@@ -20,10 +20,10 @@ reader_db_type = "hive"
 reader_db_name = "gs_ods"
 reader_table_name = "ods_i_inc_audit_trail"  # 注意oracle的识别大小写，请确保库表名的大小写和实际一致
 
-# writer 支持hive, doris
-writer_db_type = "doris"
-writer_db_name = "gs_ods"
-writer_table_name = "ods_i_inc_audit_trail"
+# writer 支持hive, doris, mysql
+writer_db_type = "mysql"
+writer_db_name = "robotbi"
+writer_table_name = "audit_trail"
 
 haveKerberos = "false"
 starrock_dynamic_partition_time_unit = "MONTH"  # 可以指定为: DAY/WEEK/MONTH
@@ -70,15 +70,21 @@ db_infos = {
                 "user": "readonly",
                 "password": "FD9Rmaw5uvQ4P6aAjfaa",
                 "port": "3306"
-            }
+            },
+            "robotbi": {
+                "host": "rm-uf6sg7am50o523c9a.mysql.rds.aliyuncs.com",
+                "user": "robotbi",
+                "password": "hXfNbXxd09Gi3vULIel1kgV8",
+                "port": "3306"
+            },
         }
     },
     "hive": {
         "prd": {
-            "host": "172.19.151.85",
+            "host": "172.19.151.79",
             "user": "developer",
             "password": "Developer_001",
-            "port": "10001"
+            "port": "10009"
         }
     },
     "doris": {
@@ -236,6 +242,20 @@ def writer_type_mapping(reader_data_type: str):
             return "BOOLEAN"
         if datax_type == "Date":
             return "DATETIME"
+    elif writer_db_type.lower() == "mysql":
+        if datax_type == "Long":
+            return "bigint"
+        if datax_type == "Double":
+            return "double"
+        if datax_type == "String":
+            return "varchar"
+        if datax_type == "Boolean":
+            return "bool"
+        if datax_type == "Date" or datax_type == "Timestamp":
+            # return "time" 修复hive 类型只显示日期的问题
+            return "datetime"
+        if datax_type == "Binary":
+            return "binary"
 
 
 def create_hive_reader_json():
@@ -379,11 +399,26 @@ def create_doris_writer_json():
     return doris_writer
 
 
+def create_mysql_writer_json():
+    global column_type_list, haveKerberos, writer_db_name, writer_table_name
+    user = writer_db_info.get("user")
+    password = writer_db_info.get("password")
+    host = reader_db_info.get("host")
+    port = reader_db_info.get("port")
+    column_list = list(map(lambda x: x[1], column_type_list))
+    path = "/".join(["/user/hive/warehouse", writer_db_name + ".db", writer_table_name, partition + "=${biz_date}"])
+    hive_writer = {"name": "mysqlwriter", "parameter": {"writeMode": "replace", "username": user, "password": password,
+                                                        "column": column_list, "connection": [{"jdbcUrl": "jdbc:mysql://%s:%s/%s?useUnicode=true&characterEncoding=utf8" % (host, port, writer_db_name), "table": [writer_table_name]}]}}
+    return hive_writer
+
+
 def create_writer_json(writer_type):
     if writer_type == "hive":
         return create_hive_writer_json()
     elif writer_type == "doris":
         return create_doris_writer_json()
+    elif writer_type == "mysql":
+        return create_mysql_writer_json()
 
 
 def create_datax_json(table_schema_file_path=None, file_name=None):
@@ -426,6 +461,22 @@ def create_writer_hive_table_sql():
         f.write(") comment ''\r")
         f.write("partitioned by (pt string comment '')\r")
         f.write("STORED AS ORC\r")
+
+
+def create_writer_mysql_table_sql():
+    global column_type_list, writer_db_name, writer_table_name
+    file_name = "create_table_%s_sql" % writer_table_name
+    with open(os.path.join(workdir, file_name), "w+", encoding="utf-8") as f:
+        f.write("create table %s.%s (\r" % (writer_db_name, writer_table_name))
+        length = len(column_type_list)
+        count = 1
+        for x in column_type_list:
+            if count == length:
+                f.write("%s %s %s\r" % (x[1], writer_type_mapping(x[2]), strip(x[3])))
+            else:
+                f.write("%s %s %s,\r" % (x[1], writer_type_mapping(x[2]), strip(x[3])))
+            count = count + 1
+        f.write(")\r")
 
 
 def starrock_dynamic_partition(f):
@@ -489,6 +540,8 @@ def create_writer_table_sql():
         create_writer_hive_table_sql()
     elif writer_db_type == "starrock" or writer_db_type == "doris":
         create_writer_doris_starrock_table_sql()
+    elif writer_db_type == 'mysql':
+        create_writer_mysql_table_sql()
 
 
 def do_batch():
