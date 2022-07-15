@@ -16,14 +16,14 @@ partition = "pt"
 env = "prd"
 
 # reader 支持hive, mysql
-reader_db_type = "hive"
-reader_db_name = "gs_ods"
-reader_table_name = "ods_i_inc_audit_trail"  # 注意oracle的识别大小写，请确保库表名的大小写和实际一致
+reader_db_type = "mysql"
+reader_db_name = "robotbi"
+reader_table_name = "robot_fae_dzb"  # 注意oracle的识别大小写，请确保库表名的大小写和实际一致
 
 # writer 支持hive, doris, mysql
-writer_db_type = "mysql"
+writer_db_type = "doris"
 writer_db_name = "robotbi"
-writer_table_name = "audit_trail"
+writer_table_name = "robot_fae_dzb"
 
 haveKerberos = "false"
 starrock_dynamic_partition_time_unit = "MONTH"  # 可以指定为: DAY/WEEK/MONTH
@@ -89,10 +89,12 @@ db_infos = {
     },
     "doris": {
         "prd": {
-            "feLoadUrl": ["10.2.240.244:8130"],
-            "host": "10.2.240.244",
+            "feLoadUrl": ["172.19.24.157:8030"],
+            "beLoadUrl": ["172.19.24.157:8040", "172.19.24.156:8040", "172.19.24.155:8040"],
+            "jdbcUrl": "jdbc:mysql://172.19.24.157:9030/",
+            "host": "172.19.24.157",
             "user": "developer",
-            "password": "Developer_001#",
+            "password": "Developer_001",
             "port": "9130",
             "maxBatchRows": 50000,
             "maxBatchByteSize": 10485760,
@@ -191,8 +193,8 @@ def reader_type_mapping(data_type: str):
         elif data_type == "BINARY":
             rtv_data_type = "Binary"
     elif reader_db_type.lower() == "mysql":
-        if data_type in ("INT", "TINYINT", "SMALLINT", "MEDIUMINT", "INT", "BIGINT"):
-            rtv_data_type = "LONG"
+        if data_type in ("INT", "TINYINT", "SMALLINT", "MEDIUMINT", "INT", "BIGINT", "INT UNSIGNED"):
+            rtv_data_type = "Long"
         elif data_type in ("FLOAT", "DOUBLE", "DECIMAL"):
             rtv_data_type = "Double"
         elif data_type in ("VARCHAR", "CHAR", "TINYTEXT", "TEXT", "MEDIUMTEXT", "LONGTEXT", "YEAR", "JSON"):
@@ -237,7 +239,7 @@ def writer_type_mapping(reader_data_type: str):
             if datax_len is None:
                 return "String"
             else:
-                return "VARCHAR(%s)" % datax_len
+                return "VARCHAR(%s)" % (int(datax_len, 10)*2)
         if datax_type == "Boolean":
             return "BOOLEAN"
         if datax_type == "Date":
@@ -390,8 +392,8 @@ def create_hive_writer_json():
 def create_doris_writer_json():
     global column_type_list, writer_db_name, writer_table_name
     column_list = list(map(lambda x: x[1], column_type_list))
-    jdbc_url = "jdbc:mysql://%s:%s" % (writer_db_info.get("host"), writer_db_info.get("port"))
-    doris_writer = {"name": "doriswriter", "parameter": {"feLoadUrl": writer_db_info.get("feLoadUrl"), "jdbcUrl": jdbc_url,
+    doris_writer = {"name": "doriswriter", "parameter": {"feLoadUrl": writer_db_info.get("feLoadUrl"),
+                                  "beLoadUrl": writer_db_info.get("beLoadUrl"), "jdbcUrl": writer_db_info.get("jdbcUrl"),
                                   "database": writer_db_name, "table": writer_table_name, "column": column_list,
                                   "username": writer_db_info.get("user"), "password": writer_db_info.get("password"),
                                   "maxBatchRows": writer_db_info.get("maxBatchRows"), "maxBatchByteSize": writer_db_info.get("maxBatchByteSize"),
